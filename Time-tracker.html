@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Attractive Daily Time Tracker</title>
+  <style>
+    /* Base styles */
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #f9f9f9;
+      color: #333;
+      margin: 0;
+      padding: 20px;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      background: #fff;
+      padding: 20px 30px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+    h1 {
+      text-align: center;
+      color: #4A90E2;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #eee;
+      margin: 20px 0;
+    }
+    /* Form styles */
+    form, .controls {
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    input[type="text"],
+    input[type="number"],
+    input[type="date"] {
+      padding: 8px 10px;
+      margin: 5px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 16px;
+    }
+    input[type="date"] {
+      width: auto;
+    }
+    button {
+      background: #4A90E2;
+      color: #fff;
+      border: none;
+      padding: 8px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.3s;
+    }
+    button:hover {
+      background: #357ABD;
+    }
+    /* Table styles */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+    th, td {
+      padding: 12px;
+      border: 1px solid #e0e0e0;
+      text-align: center;
+    }
+    th {
+      background-color: #f0f0f0;
+    }
+    /* Input field in editing mode */
+    .edit-input {
+      width: 80px;
+      text-align: center;
+      padding: 4px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Daily Time Tracker</h1>
+    
+    <!-- Select the Date -->
+    <div style="text-align: center;">
+      <label for="dateInput">Select Date: </label>
+      <input type="date" id="dateInput">
+    </div>
+    <hr>
+    
+    <!-- Form to Add New Task (only name is needed) -->
+    <form id="taskForm">
+      <input type="text" id="taskName" placeholder="Task Name" required>
+      <button type="submit">Add Task</button>
+    </form>
+  
+    <!-- Tasks Table -->
+    <table id="tasksTable">
+      <thead>
+        <tr>
+          <th>Task Name</th>
+          <th>Start Time</th>
+          <th>Stop Time</th>
+          <th>Elapsed Time</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="tasksBody">
+        <!-- Tasks will be inserted here dynamically -->
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="3"><strong>Total Time (450)</strong></td>
+          <td id="totalTime">0.00 min</td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+  
+  <script>
+    /* === Data Structure for Each Task ===
+       Each task object has:
+         - id: unique id (timestamp)
+         - name: task name
+         - status: "pending" | "running" | "paused" | "stopped"
+         - startTime: timestamp in ms when started (or null)
+         - stopTime: timestamp in ms when stopped (or null)
+         - pauseStart: timestamp in ms when pause began (or null)
+         - totalPauseDuration: cumulative paused time in ms
+         - manualElapsed: (optional) manually edited elapsed time in ms for stopped tasks
+    */
+    let tasks = [];
+  
+    // DOM references
+    const dateInput   = document.getElementById('dateInput');
+    const taskForm    = document.getElementById('taskForm');
+    const taskNameEl  = document.getElementById('taskName');
+    const tasksBody   = document.getElementById('tasksBody');
+    const totalTimeEl = document.getElementById('totalTime');
+  
+    // Set today's date as default and load tasks
+    const todayDate = new Date().toISOString().split('T')[0];
+    dateInput.value = todayDate;
+  
+    // Build a unique key for localStorage based on the selected date
+    function getStorageKey(date) {
+      return 'timeTracker_' + date;
+    }
+  
+    // Load tasks from localStorage for the given date
+    function loadTasks(date) {
+      const stored = localStorage.getItem(getStorageKey(date));
+      tasks = stored ? JSON.parse(stored) : [];
+      renderTasks();
+    }
+  
+    // Save tasks to localStorage for the given date
+    function saveTasks(date) {
+      localStorage.setItem(getStorageKey(date), JSON.stringify(tasks));
+    }
+  
+    // Format a timestamp (ms) to a local time string (HH:MM:SS)
+    function formatTimestamp(ts) {
+      if (!ts) return '';
+      return new Date(ts).toLocaleTimeString();
+    }
+  
+    // Format elapsed time (in ms) as minutes (with two decimals) followed by "min"
+    function formatTime(ms) {
+      let minutes = ms / 60000;
+      return minutes.toFixed(2) + " min";
+    }
+  
+    // Compute elapsed active time (in ms) for a task.
+    // For stopped tasks, if a manual edit was made, use that value.
+    function getElapsedTime(task) {
+      if (task.status === "pending") {
+        return 0;
+      } else if (task.status === "running") {
+        return Date.now() - task.startTime - task.totalPauseDuration;
+      } else if (task.status === "paused") {
+        return task.pauseStart - task.startTime - task.totalPauseDuration;
+      } else if (task.status === "stopped") {
+        // If manual edit exists, use it; otherwise compute the elapsed time.
+        const computed = task.stopTime && task.startTime ? (task.stopTime - task.startTime - task.totalPauseDuration) : 0;
+        return (task.manualElapsed != null) ? task.manualElapsed : computed;
+      }
+      return 0;
+    }
+  
+    /* --- Timer Functions for Task Control (only used for today’s tasks) --- */
+    function startTask(taskId) {
+      const task = tasks.find(t => t.id === taskId);
+      if (!task || task.status !== "pending") return;
+      task.startTime = Date.now();
+      task.status = "running";
+      task.totalPauseDuration = 0;
+      task.pauseStart = null;
+      task.manualElapsed = null; // clear any previous manual edit
+      renderTasks();
+      saveTasks(dateInput.value);
+    }
+  
+    function pauseTask(taskId) {
+      const task = tasks.find(t => t.id === taskId);
+      if (!task || task.status !== "running") return;
+      task.pauseStart = Date.now();
+      task.status = "paused";
+      renderTasks();
+      saveTasks(dateInput.value);
+    }
+  
+    function resumeTask(taskId) {
+      const task = tasks.find(t => t.id === taskId);
+      if (!task || task.status !== "paused") return;
+      task.totalPauseDuration += Date.now() - task.pauseStart;
+      task.pauseStart = null;
+      task.status = "running";
+      renderTasks();
+      saveTasks(dateInput.value);
+    }
+  
+    function stopTask(taskId) {
+      const task = tasks.find(t => t.id === taskId);
+      if (!task || (task.status !== "running" && task.status !== "paused")) return;
+      task.stopTime = (task.status === "paused") ? task.pauseStart : Date.now();
+      task.status = "stopped";
+      renderTasks();
+      saveTasks(dateInput.value);
+    }
+  
+    // Reset a stopped task to pending (only for today’s tasks)
+    function resetTask(taskId) {
+      const task = tasks.find(t => t.id === taskId);
+      if (!task || task.status !== "stopped") return;
+      task.status = "pending";
+      task.startTime = null;
+      task.stopTime = null;
+      task.pauseStart = null;
+      task.totalPauseDuration = 0;
+      task.manualElapsed = null;
+      renderTasks();
+      saveTasks(dateInput.value);
+    }
+  
+    // Delete a task
+    function deleteTask(taskId) {
+      tasks = tasks.filter(task => task.id !== taskId);
+      renderTasks();
+      saveTasks(dateInput.value);
+    }
+  
+    /* --- Manual Editing for Stopped Task Elapsed Time --- */
+    function editTime(taskId) {
+      const task = tasks.find(t => t.id === taskId);
+      if (!task || task.status !== "stopped") return;
+  
+      const row = tasksBody.querySelector(`tr[data-id="${taskId}"]`);
+      if (!row) return;
+  
+      // Replace the elapsed time cell with an input.
+      const elapsedTd = row.children[3];
+      const currentMinutes = (getElapsedTime(task) / 60000).toFixed(2);
+      elapsedTd.innerHTML = '';
+      const input = document.createElement('input');
+      input.type = "number";
+      input.step = "0.01";
+      input.min = "0";
+      input.value = currentMinutes;
+      input.className = "edit-input";
+      elapsedTd.appendChild(input);
+  
+      // Replace the actions cell with Save and Cancel buttons.
+      const actionsTd = row.children[4];
+      const backupActions = actionsTd.innerHTML;
+      actionsTd.innerHTML = '';
+  
+      const saveBtn = document.createElement('button');
+      saveBtn.textContent = "Save";
+      saveBtn.addEventListener('click', () => {
+        const newMinutes = parseFloat(input.value);
+        if (isNaN(newMinutes) || newMinutes < 0) {
+          alert("Please enter a valid number of minutes.");
+          return;
+        }
+        task.manualElapsed = newMinutes * 60000;
+        renderTasks();
+        saveTasks(dateInput.value);
+      });
+      actionsTd.appendChild(saveBtn);
+  
+      const cancelBtn = document.createElement('button');
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.style.marginLeft = "5px";
+      cancelBtn.addEventListener('click', () => renderTasks());
+      actionsTd.appendChild(cancelBtn);
+    }
+  
+    /* --- Render the Tasks Table --- */
+    function renderTasks() {
+      tasksBody.innerHTML = ''; // Clear previous rows
+  
+      // Determine if the selected date is today.
+      const currentSelectedDate = dateInput.value;
+      const isToday = (currentSelectedDate === todayDate);
+  
+      // For non-today dates, ensure new tasks are in "stopped" state.
+      tasks.forEach(task => {
+        // If this is not today's tasks, force tasks to be considered "stopped"
+        if (!isToday && task.status !== "stopped") {
+          task.status = "stopped";
+          // Ensure elapsed time is 0 if not already set.
+          if (!task.startTime || !task.stopTime) {
+            task.startTime = Date.now();
+            task.stopTime = Date.now();
+            task.totalPauseDuration = 0;
+          }
+        }
+  
+        const tr = document.createElement('tr');
+        tr.dataset.id = task.id;
+  
+        // Task Name Cell
+        const nameTd = document.createElement('td');
+        nameTd.textContent = task.name;
+        tr.appendChild(nameTd);
+  
+        // Start Time Cell
+        const startTd = document.createElement('td');
+        startTd.textContent = formatTimestamp(task.startTime);
+        tr.appendChild(startTd);
+  
+        // Stop Time Cell
+        const stopTd = document.createElement('td');
+        stopTd.textContent = formatTimestamp(task.stopTime);
+        tr.appendChild(stopTd);
+  
+        // Elapsed Time Cell – assign an id for live updates.
+        const elapsedTd = document.createElement('td');
+        elapsedTd.id = "elapsed-" + task.id;
+        elapsedTd.textContent = formatTime(getElapsedTime(task));
+        tr.appendChild(elapsedTd);
+  
+        // Actions Cell
+        const actionsTd = document.createElement('td');
+  
+        if (isToday) {
+          // For today’s tasks, show full stopwatch controls.
+          if (task.status === "pending") {
+            const startBtn = document.createElement('button');
+            startBtn.textContent = "Start";
+            startBtn.addEventListener('click', () => startTask(task.id));
+            actionsTd.appendChild(startBtn);
+          } else if (task.status === "running") {
+            const pauseBtn = document.createElement('button');
+            pauseBtn.textContent = "Pause";
+            pauseBtn.addEventListener('click', () => pauseTask(task.id));
+            actionsTd.appendChild(pauseBtn);
+  
+            const stopBtn = document.createElement('button');
+            stopBtn.textContent = "Stop";
+            stopBtn.style.marginLeft = "5px";
+            stopBtn.addEventListener('click', () => stopTask(task.id));
+            actionsTd.appendChild(stopBtn);
+          } else if (task.status === "paused") {
+            const resumeBtn = document.createElement('button');
+            resumeBtn.textContent = "Resume";
+            resumeBtn.addEventListener('click', () => resumeTask(task.id));
+            actionsTd.appendChild(resumeBtn);
+  
+            const stopBtn = document.createElement('button');
+            stopBtn.textContent = "Stop";
+            stopBtn.style.marginLeft = "5px";
+            stopBtn.addEventListener('click', () => stopTask(task.id));
+            actionsTd.appendChild(stopBtn);
+          } else if (task.status === "stopped") {
+            const editBtn = document.createElement('button');
+            editBtn.textContent = "Edit Time";
+            editBtn.addEventListener('click', () => editTime(task.id));
+            actionsTd.appendChild(editBtn);
+  
+            const resetBtn = document.createElement('button');
+            resetBtn.textContent = "Reset";
+            resetBtn.style.marginLeft = "5px";
+            resetBtn.addEventListener('click', () => resetTask(task.id));
+            actionsTd.appendChild(resetBtn);
+          }
+  
+          // In today’s tasks, always allow deletion.
+          const deleteBtn = document.createElement('button');
+          deleteBtn.textContent = "Delete";
+          deleteBtn.style.marginLeft = "5px";
+          deleteBtn.addEventListener('click', () => deleteTask(task.id));
+          actionsTd.appendChild(deleteBtn);
+        } else {
+          // For tasks on non-today dates, only allow manual editing and deletion.
+          const editBtn = document.createElement('button');
+          editBtn.textContent = "Edit Time";
+          editBtn.addEventListener('click', () => editTime(task.id));
+          actionsTd.appendChild(editBtn);
+  
+          const deleteBtn = document.createElement('button');
+          deleteBtn.textContent = "Delete";
+          deleteBtn.style.marginLeft = "5px";
+          deleteBtn.addEventListener('click', () => deleteTask(task.id));
+          actionsTd.appendChild(deleteBtn);
+        }
+  
+        tr.appendChild(actionsTd);
+        tasksBody.appendChild(tr);
+      });
+  
+      updateTotalTime();
+    }
+  
+    // Update the total time (summing elapsed active time for all tasks)
+    function updateTotalTime() {
+      let total = 0;
+      tasks.forEach(task => {
+        total += getElapsedTime(task);
+      });
+      totalTimeEl.textContent = formatTime(total);
+    }
+  
+    // Update only the elapsed time cells every second (if today’s tasks are running)
+    function updateElapsedTimeUI() {
+      // Only update if the selected date is today.
+      const isToday = (dateInput.value === todayDate);
+      if (isToday) {
+        tasks.forEach(task => {
+          const elapsedTd = document.getElementById("elapsed-" + task.id);
+          if (elapsedTd) {
+            // Skip if the cell is in edit mode.
+            if (elapsedTd.firstElementChild && elapsedTd.firstElementChild.tagName === "INPUT") return;
+            elapsedTd.textContent = formatTime(getElapsedTime(task));
+          }
+        });
+        updateTotalTime();
+      }
+    }
+  
+    // Update UI every second (only for today’s tasks)
+    setInterval(updateElapsedTimeUI, 1000);
+  
+    /* --- Event Listeners --- */
+  
+    // Handle new task form submission.
+    taskForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const name = taskNameEl.value.trim();
+      if (!name) return;
+  
+      const currentSelectedDate = dateInput.value;
+      const isToday = (currentSelectedDate === todayDate);
+  
+      // Build the new task. For today, start as "pending"; for other dates, force as "stopped" with 0 elapsed.
+      const newTask = {
+        id: Date.now(),
+        name: name,
+        totalPauseDuration: 0,
+        manualElapsed: null
+      };
+      if (isToday) {
+        newTask.status = "pending";
+        newTask.startTime = null;
+        newTask.stopTime = null;
+        newTask.pauseStart = null;
+      } else {
+        newTask.status = "stopped";
+        newTask.startTime = Date.now();
+        newTask.stopTime = Date.now();
+        newTask.pauseStart = null;
+      }
+  
+      tasks.push(newTask);
+      renderTasks();
+      saveTasks(dateInput.value);
+      taskNameEl.value = '';  // Clear input.
+    });
+  
+    // When the date changes, load tasks for that day.
+    dateInput.addEventListener('change', () => {
+      loadTasks(dateInput.value);
+    });
+  
+    // Initial load for today’s tasks.
+    loadTasks(todayDate);
+  </script>
+</body>
+</html>
