@@ -82,6 +82,119 @@
       border: 1px solid #ccc;
       border-radius: 4px;
     }
+    @media (max-width: 600px) {
+      /* Default table styling */
+#tasksTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+#tasksTable th,
+#tasksTable td {
+  padding: 8px;
+  border: 1px solid #ddd;
+}
+
+/* Responsive styles for screens up to 600px wide */
+@media screen and (max-width: 768px) {
+  /* Enable horizontal scrolling if needed */
+  h1 {
+    font-size: 24px;
+}
+  #tasksTable {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  /* Hide the table header */
+  #tasksTable thead {
+    display: none;
+  }
+
+  /* Convert tbody rows into “cards” */
+  #tasksTable tbody tr {
+    display: block;
+    border: 1px solid #ddd;
+    margin-bottom: 10px;
+    padding: 10px;
+  }
+
+  /* Make each tbody cell display as a block with room for a label */
+  #tasksTable tbody td {
+    min-height: 30px;
+    display: block;
+    text-align: right;
+    position: relative;
+    padding-left: 50%;
+    border: none;
+    border-bottom: 1px solid #eee;
+  }
+
+  /* Remove the bottom border from the last cell in a row */
+  #tasksTable tbody tr td:last-child {
+    border-bottom: 0;
+  }
+
+  /* Insert column labels via pseudo-elements in tbody cells */
+  #tasksTable tbody td:before {
+    position: absolute;
+    left: 10px;
+    width: 40%;
+    padding-right: 10px;
+    white-space: nowrap;
+    text-align: left;
+    font-weight: bold;
+    content: "";
+  }
+
+  /* Define labels for each column (order must match your HTML) */
+  #tasksTable tbody td:nth-of-type(1):before {
+    content: "Task Name:";
+  }
+  #tasksTable tbody td:nth-of-type(2):before {
+    content: "Start Time:";
+  }
+  #tasksTable tbody td:nth-of-type(3):before {
+    content: "Stop Time:";
+  }
+  #tasksTable tbody td:nth-of-type(4):before {
+    content: "Elapsed Time:";
+  }
+  #tasksTable tbody td:nth-of-type(5){
+padding: 0!important;
+  }
+
+  /* Convert the footer into a block layout for responsiveness */
+  #tasksTable tfoot,
+  #tasksTable tfoot tr {
+    display: block;
+  }
+  #tasksTable tfoot td {
+    display: block;
+    text-align: right;
+    position: relative;
+    padding-left: 50%;
+    border: none;
+    border-bottom: 1px solid #eee;
+  }
+  /* Remove pseudo-labels in the footer cells */
+  #tasksTable tfoot td:before {
+    content: none;
+  }
+
+  /* Stack buttons in the Actions cell on mobile view */
+  #tasksTable tbody td:last-child button {
+    display: block;
+    width: 100%;
+    margin: 5px 0 !important; /* override any inline margin styles */
+  }
+  tbody#tasksBody {
+    display: block;
+}
+}
+
+    }
   </style>
 </head>
 <body>
